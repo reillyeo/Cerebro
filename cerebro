@@ -76,11 +76,13 @@ cd ${input_dir}
 # Create output directory if it doesn't exist
 mkdir -p ${output_dir}
 
-
+# Align mutant genomes to the reference genome
 awk -F'\t' '$3 == "CDS" || $3 == "misc_RNA" || $3 == "rRNA" || $3 == "tRNA"  {gsub(/ /, "", $9); \
     print $1, $4-1, $5, $9";Feature_Type="$3}' OFS='\t' *.gff > genes.bed
 echo "Aligning all genomes to reference genome"
 parallel --max-procs 20 --no-notice "nucmer -p {.} ref*.fasta {}" ::: *.fasta
+
+# Extract and parse SNPs and indels
 parallel --max-procs 20 --no-notice "show-snps -Clr {} > {.}.txt" ::: *.delta
 parallel --max-procs 20 --no-notice "tail -n +6 {} > ${output_dir}/{.}.tsv" ::: *.txt
 rm *.delta *.txt
@@ -91,8 +93,11 @@ for file in $(ls *.tsv); do
     awk '$3 == "." {print $14, $1-1, $1, "deletion_"NR, $2, ">", $3}' OFS='\t' $file >> $(basename $file .tsv).bed
 done
 rm *.tsv
-parallel --max-procs 20 --no-notice "bedtools intersect -a {} -b ../genes.bed -wo > {.}_variants.tsv" ::: *.bed
+
+# Find intersections of genomic variants with gene annotations
+parallel --max-procs 20 --no-notice "bedtools intersect -a {} -b ${input_dir}/genes.bed -wo > {.}_variants.tsv" ::: *.bed
 rm *.bed
+rm ${input_dir}/genes.bed
 
 # Loop through all mutation files and create summary table
 for file in *.tsv; do
@@ -141,7 +146,8 @@ echo -e "Mutant\tReference\tMutation\tStartPos\tEndPos\tGene\tProduct\tFeature_T
 
 awk 'BEGIN {OFS="\t"} {sub(/_.*/, "", $3); print}' mutation_table.tsv > fixed_table.tsv
 rm mutation_table.tsv
-# Process the file
+
+# Merge consecutive indels into single entries
 awk -F'\t' 'BEGIN {OFS="\t"}
 {
     # If this is the first row, store the first indel entry
