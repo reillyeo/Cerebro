@@ -1,4 +1,4 @@
-This script is used for finding all point mutations in a set of mutant genomes compared to a reference genome, and the genes in which they occur.
+This script finds all point mutations in a set of mutant genomes compared to a reference genome, and the genes in which they occur.
 
 Requirements:
 1. Input directory containing:
