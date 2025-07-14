@@ -1,0 +1,177 @@
+#!/bin/bash
+
+# *******************************************************************************************
+#                                      Mutant Finder
+# Script for finding all mutations in a set of mutant genomes compared to a reference genome.
+# *******************************************************************************************
+# Requirements:
+# 1. Input directory containing:
+#       - assembled mutant genomes in FASTA format
+#       - one reference genome (name must begin with 'ref') in FASTA format
+#       - gene annotations for the reference genome in GFF format
+# 4. NUCmer and BEDtools installed and accessible in the PATH.
+# 5. GNU parallel installed and accessible in the PATH.
+# ************************************************************
+# Developed by Eoghan Reilly eoghan@food.ku.dk
+# ************************************************************
+
+# Set defaults for command line arguments
+input_dir="./"
+output_dir="mutatianalysis_output"
+# Parse command-line arguments
+while getopts "i:o:h" opt; do
+  case $opt in
+    i) input_dir="$OPTARG" ;;
+    o) output_dir="$OPTARG" ;;
+    h) echo -e "\n    
+***************
+mutatianalysis
+***************
+This script is used for finding all point mutations in a set of mutant genomes compared to a reference genome.
+
+Requirements:
+1. Input directory containing:
+    - assembled mutant genomes in FASTA format
+    - one reference genome (name must begin with 'ref') in FASTA format
+    - gene annotations for the reference genome in GFF format
+4. NUCmer and BEDtools installed and accessible in the PATH.
+5. GNU parallel installed and accessible in the PATH.
+************************************************************
+Developed by Eoghan Reilly eoghan@food.ku.dk
+************************************************************\n \
+                \nUsage - mutatianalysis [OPTIONS]\n \
+                \nOptions: \
+                \n\t -i\t input directory (default: current directory)\
+                \n\t -o\t output directory for results (default: mutatianalysis_output)\
+                \n\t -h\t display this help message and exit\n\n\
+                " && exit 0 ;;
+    \?) echo "Invalid option. use -h flag for usage info" >&2 && exit 1 ;;
+  esac
+done   
+
+# make sure input directory contains the required files
+if [ ! -d "$input_dir" ]; then
+    echo "Input directory $input_dir does not exist. Please provide a valid directory."
+    exit 1
+fi
+if [ -z "$(ls ${input_dir}/*.fasta 2>/dev/null)" ]; then
+    echo "No FASTA files found in the input directory $input_dir. Please provide valid FASTA files."
+    exit 1
+fi
+if [ -z "$(ls ${input_dir}/ref*.fasta 2>/dev/null)" ]; then
+    echo "No reference genome found in the input directory $input_dir. Please provide a valid reference genome file starting with 'ref'."
+    exit 1
+fi
+if [ $(ls ${input_dir}/ref*.fasta | wc -l) -ne 1 ]; then
+    echo "Multiple reference genomes found in the input directory $input_dir. Please ensure there is only one reference genome file starting with 'ref'."
+    exit 1
+fi
+if [ -z "$(ls ${input_dir}/*.gff 2>/dev/null)" ]; then
+    echo "No GFF annotation file found in the input directory $input_dir. Please provide a valid GFF file."
+    exit 1
+fi
+
+# Change to the input directory
+cd ${input_dir}
+# Create output directory if it doesn't exist
+mkdir -p ${output_dir}
+
+
+awk -F'\t' '$3 == "CDS" || $3 == "misc_RNA" || $3 == "rRNA" || $3 == "tRNA"  {gsub(/ /, "", $9); \
+    print $1, $4-1, $5, $9";Feature_Type="$3}' OFS='\t' *.gff > genes.bed
+echo "Aligning all genomes to reference genome"
+parallel --max-procs 20 --no-notice "nucmer -p {.} ref*.fasta {}" ::: *.fasta
+parallel --max-procs 20 --no-notice "show-snps -Clr {} > {.}.txt" ::: *.delta
+parallel --max-procs 20 --no-notice "tail -n +6 {} > ${output_dir}/{.}.tsv" ::: *.txt
+rm *.delta *.txt
+cd ${output_dir}
+for file in $(ls *.tsv); do
+    awk '$2 != "." && $3 != "." {print $14, $1-1, $1, "SNP_"NR, $2, ">", $3}' OFS='\t' $file > $(basename $file .tsv).bed
+    awk '$2 == "." {print $14, $1-1, $1, "insertion_"NR, $2, ">", $3}' OFS='\t' $file >> $(basename $file .tsv).bed
+    awk '$3 == "." {print $14, $1-1, $1, "deletion_"NR, $2, ">", $3}' OFS='\t' $file >> $(basename $file .tsv).bed
+done
+rm *.tsv
+parallel --max-procs 20 --no-notice "bedtools intersect -a {} -b ../genes.bed -wo > {.}_variants.tsv" ::: *.bed
+rm *.bed
+
+# Loop through all mutation files and create summary table
+for file in *.tsv; do
+    mutant=$(basename "$file" | cut -d'_' -f1)    # Extract mutant name from filename
+    ref=$(basename ../ref*.fasta .fasta)  # Get the reference genome name
+    awk -v m="$mutant" -v r="$ref" '
+    {
+        print m, r, $4, $2, $3, $11;
+    }' OFS='\t' "$file" >> mutation_summary.tsv
+done
+
+rm *variants.tsv
+
+# Process the summary file to extract desired information from the last column
+awk -F'\t' 'BEGIN {OFS="\t"} 
+{
+    gene="NA"; product="NA"; Feature_Type="NA";
+
+    # Extract gene, product and feature type from the last column
+    if ($NF ~ /gene=[^;]+/) {
+        match($NF, /gene=([^;]+)/, arr);
+        gene=arr[1];
+    }
+
+    if ($NF ~ /product=[^;]+/) {
+        match($NF, /product=([^;]+)/, arr);
+        product=arr[1];
+    }
+
+    if ($NF ~ /Feature_Type=[^;]+/) {
+        match($NF, /Feature_Type=([^;]+)/, arr);
+        Feature_Type=arr[1];
+    }
+
+    # Print all original columns except the last one, plus gene and product
+    for (i=1; i<NF; i++) printf "%s\t", $i;
+    print gene, product, Feature_Type;
+}' mutation_summary.tsv >> mutation_table.tsv
+
+rm mutation_summary.tsv
+
+echo "Processing complete. Output saved to mutation_table.tsv"
+
+# Read the header and write it to the output file, adding size column
+echo -e "Mutant\tReference\tMutation\tStartPos\tEndPos\tGene\tProduct\tFeature_Type\tMutation_Size" > mutations.tsv
+
+awk 'BEGIN {OFS="\t"} {sub(/_.*/, "", $3); print}' mutation_table.tsv > fixed_table.tsv
+rm mutation_table.tsv
+# Process the file
+awk -F'\t' 'BEGIN {OFS="\t"}
+{
+    # If this is the first row, store the first indel entry
+    if (NR == 1) {
+        mutant=$1; ref=$2; mutation=$3;
+        start=$4; end=$5; gene=$6;
+        product=$7; feature=$8;
+        size = end - start;
+        next;
+    }
+
+    # If the current row matches the previous row (same mutant, type, consecutive positions)
+    if ($1 == mutant && $3 == mutation && $4 == end) {
+        end = $5;  # Extend the end position
+        size++;    # Increase the size
+    } else {
+        # Print the previous merged indel
+        print mutant, ref, mutation, start, end, gene, product, feature, size;
+
+        # Start a new indel entry
+        mutant=$1; ref=$2; mutation=$3;
+        start=$4; end=$5; gene=$6;
+        product=$7; feature=$8;
+        size = end - start;
+    }
+}
+# Print the last merged indel
+END {print mutant, ref, mutation, start, end, gene, product, feature, size}' fixed_table.tsv >> mutations.tsv
+rm fixed_table.tsv
+echo "Merging complete. Output saved to mutations_merged.tsv"
+
+
+
