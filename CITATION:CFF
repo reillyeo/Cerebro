@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+title: Cerebro
+message: >-
+  If you use this pipeline, please consider citing it as
+  below
+type: software
+authors:
+  - given-names: Eoghan
+    family-names: Reilly
+    email: eoghan@food.ku.dk
+    affiliation: University of Copenhagen
+repository-code: 'https://github.com/reillyeo/Cerebro'
+abstract: >-
+      Identifcation and annotation of all mutations in a set of mutant genomes with respect to a reference genome
+date-released: '2025-07-14'
