@@ -179,7 +179,7 @@ awk -F'\t' 'BEGIN {OFS="\t"}
 # Print the last merged indel
 END {print mutant, ref, mutation, start, end, gene, product, feature, size}' fixed_table.tsv >> mutations.tsv
 rm fixed_table.tsv
-echo "Merging complete. Output saved to mutations_merged.tsv"
+echo "Merging complete. Output saved to mutations.tsv"
 
 
 
