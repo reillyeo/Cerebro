@@ -1,39 +1,41 @@
 #!/bin/bash
 
-# *******************************************************************************************
-#                                         Cerebro
-# Script for finding all mutations in a set of mutant genomes compared to a reference genome.
-# *******************************************************************************************
-# Requirements:
-# 1. Input directory containing:
-#       - assembled mutant genomes in FASTA format
-#       - one reference genome (name must begin with 'ref') in FASTA format
-#       - gene annotations for the reference genome in GFF format
-# 4. NUCmer and BEDtools installed and accessible in the PATH.
-# 5. GNU parallel installed and accessible in the PATH.
-# ************************************************************
+# ************************************************************************************************************
+#                                                  Cerebro
+# Tool for identifying and annotating all mutations in a set of mutant genomes compared to a reference genome.
+# ************************************************************************************************************
 # Developed by Eoghan Reilly eoghan@food.ku.dk
 # ************************************************************
 
 # Set defaults for command line arguments
 input_dir="./"
 output_dir="cerebro_output"
+threads=20
+functional_annotation=false
 # Parse command-line arguments
-while getopts "i:o:h" opt; do
+while getopts "i:o:fh" opt; do
   case $opt in
     i) input_dir="$OPTARG" ;;
     o) output_dir="$OPTARG" ;;
+    t) threads="$OPTARG" ;;
+    f) functional_annotation=true ;;
     h) echo -e "\n    
 ***************
 Cerebro - Mutation Analysis Script
 ***************
-This script is used for finding all point mutations in a set of mutant genomes compared to a reference genome.
+This script is used for identifying and annotating all point mutations in a set of mutant genomes compared to a reference genome.
+If amino acid sequences are also provided, an output fasta of the mutated proteins is produced that can be used for functional annotation with eggnog mapper.
 
 Requirements:
 1. Input directory containing:
-    - assembled mutant genomes in FASTA format
-    - one reference genome (name must begin with 'ref') in FASTA format
-    - gene annotations for the reference genome in GFF format
+    - assembled mutant genomes
+        - format: *.fasta
+    - one reference genome
+        - format: ref*.fasta
+    - gene annotations for the reference genome
+        - format: *.gff
+    - protein sequences corresponding to reference annotations (optional, for functional annotation)
+        - format: *.ffn
 4. NUCmer and BEDtools installed and accessible in the PATH.
 5. GNU parallel installed and accessible in the PATH.
 ************************************************************
@@ -43,6 +45,8 @@ Developed by Eoghan Reilly eoghan@food.ku.dk
                 \nOptions: \
                 \n\t -i\t input directory (default: current directory)\
                 \n\t -o\t output directory for results (default: cerebro_output)\
+                \n\t -t\t number of threads to use for parallel processing (default: 20)\
+                \n\t -f\t use this flag to also produce output fasta of mutated proteins for functional annotation\
                 \n\t -h\t display this help message and exit\n\n\
                 " && exit 0 ;;
     \?) echo "Invalid option. use -h flag for usage info" >&2 && exit 1 ;;
@@ -82,11 +86,11 @@ output_dir=$(readlink -f "$output_dir")
 awk -F'\t' '$3 == "CDS" || $3 == "misc_RNA" || $3 == "rRNA" || $3 == "tRNA"  {gsub(/ /, "_", $9); \
     print $1, $4-1, $5, $9";Feature_Type="$3}' OFS='\t' *.gff > genes.bed
 echo "Aligning all genomes to reference genome"
-parallel --max-procs 20 --no-notice "nucmer -p {.} ref*.fasta {}" ::: *.fasta
+parallel --max-procs ${threads} --no-notice "nucmer -p {.} ref*.fasta {}" ::: *.fasta
 
 # Extract and parse SNPs and indels
-parallel --max-procs 20 --no-notice "show-snps -Clr {} > {.}.txt" ::: *.delta
-parallel --max-procs 20 --no-notice "tail -n +6 {} > ${output_dir}/{.}.tsv" ::: *.txt
+parallel --max-procs ${threads} --no-notice "show-snps -Clr {} > {.}.txt" ::: *.delta
+parallel --max-procs ${threads} --no-notice "tail -n +6 {} > ${output_dir}/{.}.tsv" ::: *.txt
 rm *.delta *.txt
 cd ${output_dir}
 for file in $(ls *.tsv); do
@@ -97,7 +101,7 @@ done
 rm *.tsv
 
 # Find intersections of genomic variants with gene annotations
-parallel --max-procs 20 --no-notice "bedtools intersect -a {} -b ${input_dir}/genes.bed -wo > {.}_variants.tsv" ::: *.bed
+parallel --max-procs ${threads} --no-notice "bedtools intersect -a {} -b ${input_dir}/genes.bed -wo > {.}_variants.tsv" ::: *.bed
 rm *.bed
 rm ${input_dir}/genes.bed
 
@@ -116,9 +120,9 @@ rm *variants.tsv
 # Process the summary file to extract desired information from the last column
 awk -F'\t' 'BEGIN {OFS="\t"} 
 {
-    gene="NA"; product="NA"; Feature_Type="NA";
+    gene="NA"; product="NA"; Feature_Type="NA";Locus_Tag="NA";
 
-    # Extract gene, product and feature type from the last column
+    # Extract gene, product, locus tag and feature type from the last column
     if ($NF ~ /gene=[^;]+/) {
         match($NF, /gene=([^;]+)/, arr);
         gene=arr[1];
@@ -134,15 +138,20 @@ awk -F'\t' 'BEGIN {OFS="\t"}
         Feature_Type=arr[1];
     }
 
+    if ($NF ~ /locus_tag=[^;]+/) {
+        match($NF, /locus_tag=([^;]+)/, arr);
+        Locus_Tag=arr[1];
+    }
+
     # Print all original columns except the last one, plus gene and product
     for (i=1; i<NF; i++) printf "%s\t", $i;
-    print gene, product, Feature_Type;
+    print gene, product, Feature_Type, Locus_Tag;
 }' mutation_summary.tsv >> mutation_table.tsv
 
 rm mutation_summary.tsv
 
 # Read the header and write it to the output file, adding size column
-echo -e "Mutant\tReference\tMutation\tStartPos\tEndPos\tGene\tProduct\tFeature_Type\tMutation_Size" > mutations.tsv
+echo -e "Mutant\tReference\tMutation\tStartPos\tEndPos\tGene\tProduct\tFeature_Type\tLocus_Tag\tMutation_Size" > mutations.tsv
 
 awk 'BEGIN {OFS="\t"} {sub(/_.*/, "", $3); print}' mutation_table.tsv > fixed_table.tsv
 rm mutation_table.tsv
@@ -154,7 +163,7 @@ awk -F'\t' 'BEGIN {OFS="\t"}
     if (NR == 1) {
         mutant=$1; ref=$2; mutation=$3;
         start=$4; end=$5; gene=$6;
-        product=$7; feature=$8;
+        product=$7; feature=$8; Locus_Tag=$9;
         size = end - start;
         next;
     }
@@ -165,19 +174,78 @@ awk -F'\t' 'BEGIN {OFS="\t"}
         size++;    # Increase the size
     } else {
         # Print the previous merged indel
-        print mutant, ref, mutation, start, end, gene, product, feature, size;
+        print mutant, ref, mutation, start, end, gene, product, feature, Locus_Tag, size;
 
         # Start a new indel entry
         mutant=$1; ref=$2; mutation=$3;
         start=$4; end=$5; gene=$6;
-        product=$7; feature=$8;
+        product=$7; feature=$8; Locus_Tag=$9;
         size = end - start;
     }
 }
 # Print the last merged indel
-END {print mutant, ref, mutation, start, end, gene, product, feature, size}' fixed_table.tsv >> mutations.tsv
+END {print mutant, ref, mutation, start, end, gene, product, feature, Locus_Tag, size}' fixed_table.tsv >> mutations.tsv
 rm fixed_table.tsv
 echo "Merging complete. Output saved to mutations.tsv"
 
+# Perform functional annotation if requested
+if [ "$functional_annotation" = false ]; then
+    echo "Pipeline completed! Results saved in $output_dir"
+    exit 0
+else
+    echo "Extracting mutated proteins..."
+fi
 
+# remove newlines from sequences in .faa file
+awk '/^>/ {print (NR==1?"":"\n") $0; next} {printf "%s", $0} END {print ""}' ${input_dir}/*.ffn > all_proteins.fa
 
+# extract relevant proteins
+awk -F'\t' 'NR>1 {print $9}' mutations.tsv | while read id; do grep -A 1 ${id} all_proteins.fa >> relevant_proteins.fa; done
+
+# remove duplicate proteins from fasta file
+seqkit rmdup relevant_proteins.fa > eggnog_proteins.fa
+
+# translate nucleotide sequence to protein sequence
+seqkit translate eggnog_proteins.fa -o eggnog_proteins.faa
+
+# delete intermediate files
+rm eggnog_proteins.fa all_proteins.fa relevant_proteins.fa
+
+###
+### Can uncomment the following lines if you wish to perform functional analysis on the command line (eggnog-mapper tool must be installed)
+### But the webtool is much much much faster
+###
+
+# # create output directory for eggnog results
+# mkdir -p ${output_dir}/emapper_results/
+# mkdir -p ${output_dir}/tmp/
+# # run eggnog mapper on extracted proteins
+# emapper.py \
+#     --cpu ${threads} \
+#     --mp_start_method forkserver \
+#     -o out \
+#     --output_dir ${output_dir}/emapper_results/ \
+#     --temp_dir ${output_dir}/tmp/ \
+#     --override -m diamond \
+#     -i eggnog_proteins.fa \
+#     --evalue 0.001 \
+#     --score 60 \
+#     --pident 40 \
+#     --query_cover 20 \
+#     --subject_cover 20 \
+#     --itype proteins \
+#     --tax_scope auto \
+#     --target_orthologs all \
+#     --go_evidence non-electronic \
+#     --pfam_realign none 
+#    # --excel > /emapper_web_jobs/emapper_jobs/user_data/MM_a5t2rwrw/emapper.out 2> /emapper_web_jobs/emapper_jobs/user_data/MM_a5t2rwrw/emapper.err
+
+# mv ${output_dir}/emapper_results/*.annotations ${output_dir}/emapper_annotations.tsv
+# rm -r ${output_dir}/tmp ${output_dir}/emapper_results
+
+# head -n -3 ${output_dir}/emapper_annotations.tsv | tail -n +5 > ${output_dir}/functional_annotations.tsv
+# rm ${output_dir}/emapper_annotations.tsv
+
+# Rscript merge_tables.R
+
+echo "Pipeline finished successfully! The eggnog_proteins.fa file can be uploaded to http://eggnog-mapper.embl.de/FESNOV to obtain functional annotations. The resulting annotations.tsv file can then be merged with the mutations.tsv file using the cerebro_merge_tables.sh script."
