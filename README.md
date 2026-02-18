@@ -31,7 +31,7 @@ Options:
 ## Output:
 - 9 column .tsv file containing information on all mutations in each mutant with respect to the reference genome (columns: Mutant, Reference, Mutation, StartPos, EndPos, Gene, Product, Feature_Type, Mutation_Size)
 
-- (if -f flag is used) A single fasta file containing the amino acid sequences of all the genomic features in which a mutation was found (can be uploaded to http://eggnog-mapper.embl.de/FESNOV for functional annotation)
+- (if -f flag is used) A single fasta file containing the amino acid sequences of all the genomic features in which a mutation was found (can be provided to http://eggnog-mapper.embl.de/FESNOV for functional annotation)
 
 ## Extras:
 The cerebro_merge_tables.sh script can be used to merge the output of eggnog mapper with the mutation summary table. For this script to work, the eggnog mapper annotation table must be named emapper_annotations.tsv
