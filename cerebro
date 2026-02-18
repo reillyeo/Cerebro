@@ -35,7 +35,7 @@ Requirements:
     - gene annotations for the reference genome
         - format: *.gff
     - protein sequences corresponding to reference annotations (optional, for functional annotation)
-        - format: *.ffn
+        - format: *.faa
 4. NUCmer and BEDtools installed and accessible in the PATH.
 5. GNU parallel installed and accessible in the PATH.
 ************************************************************
@@ -197,7 +197,7 @@ else
 fi
 
 # remove newlines from sequences in .faa file
-awk '/^>/ {print (NR==1?"":"\n") $0; next} {printf "%s", $0} END {print ""}' ${input_dir}/*.ffn > all_proteins.fa
+awk '/^>/ {print (NR==1?"":"\n") $0; next} {printf "%s", $0} END {print ""}' ${input_dir}/*.faa > all_proteins.fa
 
 # extract relevant proteins
 awk -F'\t' 'NR>1 {print $9}' mutations.tsv | while read id; do grep -A 1 ${id} all_proteins.fa >> relevant_proteins.fa; done
@@ -206,46 +206,47 @@ awk -F'\t' 'NR>1 {print $9}' mutations.tsv | while read id; do grep -A 1 ${id} a
 seqkit rmdup relevant_proteins.fa > eggnog_proteins.fa
 
 # translate nucleotide sequence to protein sequence
-seqkit translate eggnog_proteins.fa -o eggnog_proteins.faa
+# seqkit translate eggnog_proteins.fa -o eggnog_proteins.faa
 
 # delete intermediate files
-rm eggnog_proteins.fa all_proteins.fa relevant_proteins.fa
+rm all_proteins.fa relevant_proteins.fa
 
 ###
 ### Can uncomment the following lines if you wish to perform functional analysis on the command line (eggnog-mapper tool must be installed)
 ### But the webtool is much much much faster
 ###
 
-# # create output directory for eggnog results
-# mkdir -p ${output_dir}/emapper_results/
-# mkdir -p ${output_dir}/tmp/
-# # run eggnog mapper on extracted proteins
-# emapper.py \
-#     --cpu ${threads} \
-#     --mp_start_method forkserver \
-#     -o out \
-#     --output_dir ${output_dir}/emapper_results/ \
-#     --temp_dir ${output_dir}/tmp/ \
-#     --override -m diamond \
-#     -i eggnog_proteins.fa \
-#     --evalue 0.001 \
-#     --score 60 \
-#     --pident 40 \
-#     --query_cover 20 \
-#     --subject_cover 20 \
-#     --itype proteins \
-#     --tax_scope auto \
-#     --target_orthologs all \
-#     --go_evidence non-electronic \
-#     --pfam_realign none 
-#    # --excel > /emapper_web_jobs/emapper_jobs/user_data/MM_a5t2rwrw/emapper.out 2> /emapper_web_jobs/emapper_jobs/user_data/MM_a5t2rwrw/emapper.err
+# create output directory for eggnog results
+mkdir -p ${output_dir}/emapper_results/
+mkdir -p ${output_dir}/tmp/
+# run eggnog mapper on extracted proteins
+emapper.py \
+     --cpu ${threads} \
+     --mp_start_method forkserver \
+     -o out \
+     --output_dir ${output_dir}/emapper_results/ \
+     --temp_dir ${output_dir}/tmp/ \
+     --override -m diamond \
+     -i eggnog_proteins.fa \
+     --evalue 0.001 \
+     --score 60 \
+     --pident 40 \
+     --query_cover 20 \
+     --subject_cover 20 \
+     --itype proteins \
+     --tax_scope auto \
+     --target_orthologs all \
+     --go_evidence non-electronic \
+     --pfam_realign none 
+    #--excel > /emapper_web_jobs/emapper_jobs/user_data/MM_a5t2rwrw/emapper.out 2> /emapper_web_jobs/emapper_jobs/user_data/MM_a5t2rwrw/emapper.err
 
-# mv ${output_dir}/emapper_results/*.annotations ${output_dir}/emapper_annotations.tsv
-# rm -r ${output_dir}/tmp ${output_dir}/emapper_results
+ mv ${output_dir}/emapper_results/*.annotations ${output_dir}/emapper_annotations.tsv
+ rm -r ${output_dir}/tmp ${output_dir}/emapper_results
 
-# head -n -3 ${output_dir}/emapper_annotations.tsv | tail -n +5 > ${output_dir}/functional_annotations.tsv
-# rm ${output_dir}/emapper_annotations.tsv
+ head -n -3 ${output_dir}/emapper_annotations.tsv | tail -n +5 > ${output_dir}/functional_annotations.tsv
+ rm ${output_dir}/emapper_annotations.tsv
 
-# Rscript merge_tables.R
+ Rscript merge_tables.R
 
-echo "Pipeline finished successfully! The eggnog_proteins.fa file can be uploaded to http://eggnog-mapper.embl.de/FESNOV to obtain functional annotations. The resulting annotations.tsv file can then be merged with the mutations.tsv file using the cerebro_merge_tables.sh script."
+echo "Pipeline finished successfully!" 
+#The eggnog_proteins.fa file can be uploaded to http://eggnog-mapper.embl.de/FESNOV to obtain functional annotations. The resulting annotations.tsv file can then be merged with the mutations.tsv file using the cerebro_merge_tables.sh script."

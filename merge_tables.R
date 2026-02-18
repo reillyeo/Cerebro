@@ -5,7 +5,7 @@ library(tidyverse)
 
 # Load data
 mutation_data <- read_tsv("mutations.tsv")
-annotation_data <- read_tsv("emapper.annotations.tsv") %>% rename(Locus_Tag = "#query")
+annotation_data <- read_tsv("emapper.annotations.tsv", comment="##") %>% rename(Locus_Tag = "#query")
 
 merged_data <- mutation_data %>% left_join(annotation_data, by = "Locus_Tag",unmatched = "drop")
 
